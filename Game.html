@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lunar Flappy Bird</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0a0a2e 0%, #16213e 50%, #0f3460 100%);
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 400px;
+            max-height: 600px;
+            background: linear-gradient(180deg, #0a0a2e 0%, #16213e 50%, #0f3460 100%);
+            overflow: hidden;
+            border: 2px solid #333;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+        
+        .stars {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        .star {
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+            animation: twinkle 2s infinite alternate;
+        }
+        
+        @keyframes twinkle {
+            0% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+        
+        .game-ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            z-index: 10;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            z-index: 10;
+            display: none;
+        }
+        
+        .game-over h2 {
+            font-size: 32px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .game-over button {
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+        }
+        
+        .game-over button:hover {
+            transform: scale(1.05);
+        }
+        
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            text-align: center;
+            font-size: 14px;
+            opacity: 0.8;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div class="stars" id="stars"></div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="game-ui">
+            <div>Score: <span id="score">0</span></div>
+        </div>
+        <div class="game-over" id="gameOver">
+            <h2>Mission Failed!</h2>
+            <p>Final Score: <span id="finalScore">0</span></p>
+            <button onclick="restartGame()">Launch Again</button>
+        </div>
+        <div class="instructions">
+            Tap or Press Space to Navigate Through Asteroids
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const gameOverElement = document.getElementById('gameOver');
+        const finalScoreElement = document.getElementById('finalScore');
+
+        // Set canvas size
+        function resizeCanvas() {
+            const container = document.getElementById('gameContainer');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Game variables
+        let gameState = 'playing';
+        let score = 0;
+        let gameSpeed = 2;
+        
+        // Bird object with lunar physics
+        const bird = {
+            x: canvas.width * 0.2,
+            y: canvas.height / 2,
+            width: 30,
+            height: 25,
+            velocity: 0,
+            gravity: 0.3, // Reduced gravity for moon physics
+            jump: -6,     // Reduced jump force
+            color: '#FFD700',
+            trail: []
+        };
+
+        // Pipes (asteroids) array
+        const pipes = [];
+        const pipeWidth = 60;
+        const pipeGap = 180;
+        
+        // Create stars background
+        function createStars() {
+            const starsContainer = document.getElementById('stars');
+            for (let i = 0; i < 100; i++) {
+                const star = document.createElement('div');
+                star.className = 'star';
+                star.style.left = Math.random() * 100 + '%';
+                star.style.top = Math.random() * 100 + '%';
+                star.style.width = Math.random() * 3 + 1 + 'px';
+                star.style.height = star.style.width;
+                star.style.animationDelay = Math.random() * 2 + 's';
+                starsContainer.appendChild(star);
+            }
+        }
+
+        // Draw bird with space suit effect
+        function drawBird() {
+            // Add trail effect
+            bird.trail.push({ x: bird.x, y: bird.y });
+            if (bird.trail.length > 8) {
+                bird.trail.shift();
+            }
+            
+            // Draw trail
+            for (let i = 0; i < bird.trail.length; i++) {
+                const alpha = i / bird.trail.length * 0.5;
+                ctx.fillStyle = `rgba(255, 215, 0, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(bird.trail[i].x + bird.width/2, bird.trail[i].y + bird.height/2, 
+                       (bird.width/2) * (i / bird.trail.length), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw bird body (space suit)
+            ctx.fillStyle = bird.color;
+            ctx.beginPath();
+            ctx.arc(bird.x + bird.width/2, bird.y + bird.height/2, bird.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw helmet reflection
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.beginPath();
+            ctx.arc(bird.x + bird.width/3, bird.y + bird.height/3, bird.width/4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw thruster effect when jumping
+            if (bird.velocity < -2) {
+                ctx.fillStyle = '#00BFFF';
+                ctx.beginPath();
+                ctx.arc(bird.x + bird.width/2, bird.y + bird.height + 5, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Draw pipes as asteroids
+        function drawPipes() {
+            ctx.fillStyle = '#696969';
+            ctx.strokeStyle = '#A9A9A9';
+            ctx.lineWidth = 2;
+            
+            pipes.forEach(pipe => {
+                // Top asteroid
+                ctx.beginPath();
+                ctx.fillRect(pipe.x, 0, pipeWidth, pipe.top);
+                ctx.strokeRect(pipe.x, 0, pipeWidth, pipe.top);
+                
+                // Add some rocky texture
+                for (let i = 0; i < 5; i++) {
+                    ctx.fillStyle = '#A9A9A9';
+                    ctx.beginPath();
+                    ctx.arc(pipe.x + Math.random() * pipeWidth, 
+                           Math.random() * pipe.top, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Bottom asteroid
+                ctx.fillStyle = '#696969';
+                ctx.beginPath();
+                ctx.fillRect(pipe.x, pipe.bottom, pipeWidth, canvas.height - pipe.bottom);
+                ctx.strokeRect(pipe.x, pipe.bottom, pipeWidth, canvas.height - pipe.bottom);
+                
+                // Add rocky texture to bottom
+                for (let i = 0; i < 5; i++) {
+                    ctx.fillStyle = '#A9A9A9';
+                    ctx.beginPath();
+                    ctx.arc(pipe.x + Math.random() * pipeWidth, 
+                           pipe.bottom + Math.random() * (canvas.height - pipe.bottom), 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        // Update bird physics
+        function updateBird() {
+            if (gameState !== 'playing') return;
+            
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+            
+            // Boundary collision
+            if (bird.y + bird.height > canvas.height || bird.y < 0) {
+                gameOver();
+            }
+        }
+
+        // Update pipes
+        function updatePipes() {
+            if (gameState !== 'playing') return;
+            
+            // Move pipes
+            pipes.forEach(pipe => {
+                pipe.x -= gameSpeed;
+            });
+            
+            // Remove off-screen pipes
+            for (let i = pipes.length - 1; i >= 0; i--) {
+                if (pipes[i].x + pipeWidth < 0) {
+                    pipes.splice(i, 1);
+                    score++;
+                    scoreElement.textContent = score;
+                    
+                    // Increase game speed slightly
+                    if (score % 5 === 0) {
+                        gameSpeed += 0.2;
+                    }
+                }
+            }
+            
+            // Add new pipes
+            if (pipes.length === 0 || pipes[pipes.length - 1].x < canvas.width - 300) {
+                const pipeHeight = Math.random() * (canvas.height - pipeGap - 100) + 50;
+                pipes.push({
+                    x: canvas.width,
+                    top: pipeHeight,
+                    bottom: pipeHeight + pipeGap
+                });
+            }
+        }
+
+        // Collision detection
+        function checkCollisions() {
+            if (gameState !== 'playing') return;
+            
+            pipes.forEach(pipe => {
+                if (bird.x < pipe.x + pipeWidth && 
+                    bird.x + bird.width > pipe.x && 
+                    (bird.y < pipe.top || bird.y + bird.height > pipe.bottom)) {
+                    gameOver();
+                }
+            });
+        }
+
+        // Game over
+        function gameOver() {
+            gameState = 'gameOver';
+            finalScoreElement.textContent = score;
+            gameOverElement.style.display = 'block';
+        }
+
+        // Restart game
+        function restartGame() {
+            gameState = 'playing';
+            score = 0;
+            gameSpeed = 2;
+            bird.y = canvas.height / 2;
+            bird.velocity = 0;
+            bird.trail = [];
+            pipes.length = 0;
+            scoreElement.textContent = score;
+            gameOverElement.style.display = 'none';
+        }
+
+        // Jump function
+        function jump() {
+            if (gameState === 'playing') {
+                bird.velocity = bird.jump;
+            }
+        }
+
+        // Game loop
+        function gameLoop() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Update game objects
+            updateBird();
+            updatePipes();
+            checkCollisions();
+            
+            // Draw everything
+            drawPipes();
+            drawBird();
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                jump();
+            }
+        });
+
+        // Touch controls for mobile
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            jump();
+        });
+
+        canvas.addEventListener('click', jump);
+
+        // Initialize game
+        createStars();
+        gameLoop();
+    </script>
+</body>
+</html>
